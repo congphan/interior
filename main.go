@@ -3,14 +3,14 @@ package main
 import (
 	"log"
 	"net/http"
-	"strings"
 	"time"
-
-	"github.com/congphan/interior/templates"
 
 	"github.com/adam-hanna/jwt-auth/jwt"
 	"goji.io"
 	"goji.io/pat"
+
+	"github.com/congphan/interior/controllers"
+	"github.com/congphan/interior/templates"
 )
 
 var restrictedRoute jwt.Auth
@@ -29,52 +29,6 @@ var restrictedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Req
 	}
 
 	templates.RenderTemplate(w, "restricted", &templates.RestrictedPage{csrfSecret, claims.CustomClaims["Role"].(string)})
-})
-
-var loginHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "GET":
-		templates.RenderTemplate(w, "login", &templates.LoginPage{})
-
-	case "POST":
-		r.ParseForm()
-
-		if strings.Join(r.Form["username"], "") == "testUser" && strings.Join(r.Form["password"], "") == "testPassword" {
-			claims := jwt.ClaimsType{}
-			claims.CustomClaims = make(map[string]interface{})
-			claims.CustomClaims["Role"] = "user"
-
-			err := restrictedRoute.IssueNewTokens(w, &claims)
-			if err != nil {
-				http.Error(w, "Internal Server Error", 500)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-
-		} else {
-			http.Error(w, "Unauthorized", 401)
-		}
-
-	default:
-		http.Error(w, "Method Not Allowed", 405)
-	}
-})
-
-var logoutHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "POST":
-		err := restrictedRoute.NullifyTokens(w, r)
-		if err != nil {
-			http.Error(w, "Internal server error", 500)
-			return
-		}
-
-		http.Redirect(w, r, "/login", 302)
-
-	default:
-		http.Error(w, "Method Not Allowed", 405)
-	}
 })
 
 func main() {
@@ -96,14 +50,15 @@ func main() {
 
 	mux := goji.NewMux()
 
-	mux.HandleFunc(pat.New("/login"), loginHandler)
+	authCtrl := controllers.NewAuthController(&restrictedRoute)
+	mux.HandleFunc(pat.New("/login"), authCtrl.Login)
 
 	// this will never be available because we never issue tokens
 	// see login_logout example for how to provide tokens
 	mux.Handle(pat.New("/restricted"), restrictedRoute.Handler(restrictedHandler))
 
 	// logout
-	mux.Handle(pat.New("/logout"), restrictedRoute.Handler(logoutHandler))
+	mux.HandleFunc(pat.New("/logout"), authCtrl.Logout)
 
 	//	mux.Use(restrictedRoute.Handler)
 	http.ListenAndServe("localhost:8000", mux)
